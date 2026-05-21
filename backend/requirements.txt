@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 fastapi
 uvicorn[standard]
 sqlalchemy
@@ -13,4 +14,21 @@ python-dotenv
 pydantic-settings
 pyjwt
 pytest==8.1.1
+=======
+fastapi
+uvicorn[standard]
+sqlalchemy
+alembic
+pydantic[email]
+python-jose[cryptography]
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart
+pillow
+psycopg2-binary
+python-dotenv
+pydantic-settings
+pyjwt
+pytest==8.1.1
+>>>>>>> 8d6cb81 (Add posts filtering/search with pagination and implement admin endpoints)
 httpx==0.27.0
