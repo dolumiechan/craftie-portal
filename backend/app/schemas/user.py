@@ -1,17 +1,19 @@
-<<<<<<< HEAD
 from pydantic import BaseModel, EmailStr, ConfigDict
 from datetime import datetime
 from typing import Optional
 from app.schemas.post import PostRead
 
 class UserBase(BaseModel):
-    email: EmailStr
+    """ Базовая схема пользователя с уникальными данными. """
+    email: EmailStr  # Автоматически проверяет валидность формата почты (наличие @, домена)
     username: str
 
 class UserCreate(UserBase):
+    """ Схема для регистрации. Только здесь мы принимаем чистый пароль от пользователя. """
     password: str
 
 class UserRead(UserBase):
+    """ Схема профиля пользователя для отдачи в API. Пароль сюда не включается в целях безопасности! """
     id: int
     role_id: Optional[int] = None
     created_at: datetime
@@ -19,30 +21,7 @@ class UserRead(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
 class UserDetailRead(UserRead):
+    """ Схема расширенного профиля. Показывает пользователя вместе со списком его постов. """
     posts: list[PostRead] = []
 
-=======
-from pydantic import BaseModel, EmailStr, ConfigDict
-from datetime import datetime
-from typing import Optional
-from app.schemas.post import PostRead
-
-class UserBase(BaseModel):
-    email: EmailStr
-    username: str
-
-class UserCreate(UserBase):
-    password: str
-
-class UserRead(UserBase):
-    id: int
-    role_id: Optional[int] = None
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-class UserDetailRead(UserRead):
-    posts: list[PostRead] = []
-
->>>>>>> 8d6cb81 (Add posts filtering/search with pagination and implement admin endpoints)
     model_config = ConfigDict(from_attributes=True)

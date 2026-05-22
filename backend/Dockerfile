@@ -1,44 +1,26 @@
-<<<<<<< HEAD
-# Используем легковесный образ Python
-FROM python:3.11-slim
+# Шаг 1: Используем официальный легковесный образ Python
 
-# Устанавливаем системные зависимости для psycopg2
+# Шаг 2: Установка системных утилит и библиотек для сборки бинарных зависимостей (например, psycopg2 для PostgreSQL)
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Устанавливаем рабочую директорию
+# Шаг 3: Настройка рабочей директории внутри контейнера
 WORKDIR /app
 
-# Копируем зависимости и устанавливаем их
+# Шаг 4: Кэширование слоя зависимостей. Копируем requirements отдельно,
+# чтобы не пересобирать пакеты при изменении кода приложения.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Копируем весь код приложения
+# Шаг 5: Копирование исходного кода бэкенда в контейнер
 COPY . .
 
-# Команда для запуска (используем -m для корректных импортов)
-=======
-# Используем легковесный образ Python
-FROM python:3.11-slim
+# Шаг 6: Открытие порта для сетевого взаимодействия внутри Docker-сети
+EXPOSE 8000
 
-# Устанавливаем системные зависимости для psycopg2
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Устанавливаем рабочую директорию
-WORKDIR /app
-
-# Копируем зависимости и устанавливаем их
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Копируем весь код приложения
-COPY . .
-
-# Команда для запуска (используем -m для корректных импортов)
->>>>>>> 8d6cb81 (Add posts filtering/search with pagination and implement admin endpoints)
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Шаг 7: Команда запуска ASGI-сервера Uvicorn.
+# --proxy-headers сообщает Uvicorn, что он работает за прокси-сервером (Docker/Nginx)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

@@ -4,6 +4,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
+sys.path.insert(0, "/app")
 sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app.core.config import settings
@@ -13,6 +14,8 @@ from app.models.category import InterestCategory
 from app.models.post import Post, PostImage
 from app.models.comment import Comment
 from app.models.user_log import UserLog
+from app.models.tag import Tag
+from app.models.like import Like
 
 config = context.config
 
