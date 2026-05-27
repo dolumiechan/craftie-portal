@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { likePost, unlikePost } from '../../api/likes';
 import { confirmDeletePost } from '../../api/posts';
+import { useAuth } from '../../context/AuthContext';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { getPostDisplay } from '../../utils/post';
 import { IconComment, IconHeart, IconMoreVertical } from '../ui/Icons';
-export { useAuth } from '../context/AuthContext';
 
 export default function PostCard({ post, onDeleted }) {
   const navigate = useNavigate();
