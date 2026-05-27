@@ -1,59 +1,50 @@
-version: "3.8"
-
 services:
-  # === СЕРВИС БАЗЫ ДАННЫХ ===
   db:
-    # Используем легковесный официальный образ PostgreSQL на базе Alpine Linux
     image: postgres:15-alpine
     container_name: creative_db_container
-    # Автоматически перезапускать базу при сбоях или перезагрузке сервера
     restart: always
-    # Данные для авторизации берутся из скрытого файла .env (безопасность данных)
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    # Пробрасываем порт базы данных наружу (с компьютера на контейнер)
     ports:
       - "5432:5432"
-    # Сохраняем данные БД на жестком диске компьютера, чтобы они не стерлись при остановке контейнера
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # Проверка "здоровья" базы. Каждые 5 секунд проверяем, готова ли база к работе
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
-  # === СЕРВИС БЭКЕНДА (FastAPI) ===
   backend:
-    # Docker сам соберет образ по инструкциям из папки ./backend (там ищется Dockerfile)
     build: ./backend
     container_name: creative_backend_container
     restart: always
-    # Открываем порт 8000, чтобы к API можно было обращаться из браузера или фронтенда
     ports:
       - "8000:8000"
-    # Передаем бэкенду параметры для подключения к нашей базе данных
     environment:
-      POSTGRES_SERVER: db          # Имя сервиса базы данных внутри сети Docker
+      POSTGRES_SERVER: db
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_PORT: 5432
-    # СТРОГИЙ ПОРЯДОК ЗАПУСКА: бэкенд начнет включаться ТОЛЬКО после того, 
-    # как база данных успешно пройдет проверку healthcheck (станет healthy)
     depends_on:
       db:
         condition: service_healthy
-    # Монтируем папки для разработки:
-    # 1. Синхронизируем код бэкенда, чтобы изменения применялись без пересборки контейнера
-    # 2. Изолируем папку media, где будут храниться загруженные пользователями картинки
     volumes:
       - ./backend:/app
       - ./backend/media:/app/media
 
-# Объявляем именованное хранилище для базы данных, чтобы не терять таблицы при перезапуске
+  frontend:
+    build: ./frontend
+    container_name: creative_frontend_container
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:

@@ -1,32 +1,27 @@
-import React, { useState, useEffect } from 'react';
-import Filters from '../components/Filters';
-import PostList from '../components/PostList';
+import { useState, useEffect } from 'react';
+import PostList from '../components/home/PostList';
+import RightSidebar from '../components/home/RightSidebar';
+import Alert from '../components/ui/Alert';
+import { fetchPosts } from '../api/posts';
+import { getApiErrorMessage } from '../utils/apiError';
 import api from '../api/axios';
 
-export default function Home() {
+const POSTS_PER_PAGE = 6;
+
+export default function Home({ search = '' }) {
   const [posts, setPosts] = useState([]);
-  const [categories, setCategories] = useState([]); // Сюда прилетят категории из БД
+  const [total, setTotal] = useState(0);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  
-  // Состояния для фильтрации и пагинации
-  const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState(null);
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-
-  const POSTS_PER_PAGE = 6;
 
   useEffect(() => {
-    const fetchCategories = async () => {
-      try {
-        const response = await api.get('/categories/'); // Наш эндпоинт категорий
-        setCategories(response.data);
-      } catch (err) {
-        console.error("Не удалось загрузить категории с бэкенда:", err);
-      }
-    };
-    fetchCategories();
+    api
+      .get('/categories/')
+      .then((response) => setCategories(response.data))
+      .catch(() => setCategories([]));
   }, []);
 
   useEffect(() => {
@@ -34,61 +29,66 @@ export default function Home() {
   }, [search, categoryId]);
 
   useEffect(() => {
-    const fetchPosts = async () => {
+    const loadPosts = async () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await api.get('/posts/', {
-          params: {
-            page: page,
-            size: POSTS_PER_PAGE,
-            // Передаем category_id на бэкенд, только если он выбран (не null)
-            category_id: categoryId || undefined, 
-            search: search || undefined
-          }
+        const data = await fetchPosts({
+          skip: (page - 1) * POSTS_PER_PAGE,
+          limit: POSTS_PER_PAGE,
+          categoryId,
+          search,
         });
-
-        setPosts(response.data);
-        setHasMore(response.data.length === POSTS_PER_PAGE);
+        setPosts(data.items);
+        setTotal(data.total);
       } catch (err) {
-        console.error("Ошибка при получении постов:", err);
-        setError("Не удалось загрузить публикации.");
+        setError(
+          getApiErrorMessage(err, 'Не удалось загрузить публикации. Проверьте, что бэкенд запущен.'),
+        );
       } finally {
         setLoading(false);
       }
     };
 
-    fetchPosts();
-  }, [page, categoryId, search]); // Срабатывает каждый раз, когда меняется категория, поиск или страница!
+    loadPosts();
+  }, [page, categoryId, search]);
+
+  const hasMore = page * POSTS_PER_PAGE < total;
+
+  const handlePostDeleted = (postId) => {
+    setPosts((prev) => prev.filter((post) => post.id !== postId));
+    setTotal((prev) => Math.max(0, prev - 1));
+  };
 
   return (
-    <div>
-      <h2 style={styles.title}>Лента творческих проектов</h2>
-      
-      <Filters 
-        search={search} 
-        setSearch={setSearch} 
-        categoryId={categoryId} 
-        setCategoryId={setCategoryId} 
+    <div className="flex h-full w-full flex-col overflow-hidden lg:flex-row lg:gap-8">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Лента публикаций">
+        {error && (
+          <div className="mb-6 shrink-0">
+            <Alert onDismiss={() => setError(null)}>{error}</Alert>
+          </div>
+        )}
+
+        {!error && (
+          <PostList
+            posts={posts}
+            loading={loading}
+            page={page}
+            total={total}
+            setPage={setPage}
+            hasMore={hasMore}
+            onPostDeleted={handlePostDeleted}
+          />
+        )}
+      </section>
+
+      <div className="shrink-0">
+        <RightSidebar
         categories={categories}
+        categoryId={categoryId}
+        setCategoryId={setCategoryId}
       />
-
-      {error && <div style={styles.error}>{error}</div>}
-
-      {!error && (
-        <PostList 
-          posts={posts} 
-          loading={loading} 
-          page={page} 
-          setPage={setPage} 
-          hasMore={hasMore} 
-        />
-      )}
+      </div>
     </div>
   );
 }
-
-const styles = {
-  title: { marginBottom: '24px', color: '#222', fontSize: '28px', fontWeight: '600' },
-  error: { padding: '16px', backgroundColor: '#fff0f0', border: '1px solid #ffcccc', borderRadius: '8px', color: '#cc0000', textAlign: 'center', marginBottom: '20px' }
-};
