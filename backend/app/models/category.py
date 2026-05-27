@@ -12,5 +12,9 @@ class InterestCategory(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), unique=True, nullable=False, index=True)
 
-    # Список всех постов, опубликованных в рамках данной категории
     posts = relationship("Post", back_populates="category")
+    interested_users = relationship(
+        "User",
+        secondary="user_interests",
+        back_populates="interests",
+    )

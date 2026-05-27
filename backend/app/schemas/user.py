@@ -1,27 +1,45 @@
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 from app.schemas.post import PostRead
+from app.schemas.category import InterestCategoryRead
+
 
 class UserBase(BaseModel):
-    """ Базовая схема пользователя с уникальными данными. """
-    email: EmailStr  # Автоматически проверяет валидность формата почты (наличие @, домена)
+    email: EmailStr
     username: str
 
+
 class UserCreate(UserBase):
-    """ Схема для регистрации. Только здесь мы принимаем чистый пароль от пользователя. """
-    password: str
+    password: str = Field(min_length=6)
+
 
 class UserRead(UserBase):
-    """ Схема профиля пользователя для отдачи в API. Пароль сюда не включается в целях безопасности! """
     id: int
     role_id: Optional[int] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class UserMeRead(UserRead):
+    role_name: Optional[str] = None
+    is_active: bool = True
+    bio: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class UserDetailRead(UserRead):
-    """ Схема расширенного профиля. Показывает пользователя вместе со списком его постов. """
+    role_name: Optional[str] = None
+    bio: Optional[str] = None
+    avatar_url: Optional[str] = None
+    interests: list[InterestCategoryRead] = []
     posts: list[PostRead] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserRoleUpdate(BaseModel):
+    role: Literal["user", "moderator", "admin"]

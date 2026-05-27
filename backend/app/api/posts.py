@@ -1,158 +1,260 @@
-import os
-import uuid
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from sqlalchemy.orm import Session
-from typing import List, Optional
 import json
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.image_service import image_service
+from app.core.security import get_current_user, get_current_user_optional
+from app.core.permissions import is_staff_user
 from app.models.user import User
 from app.models.post import Post, PostImage
 from app.models.tag import Tag
-from app.schemas.post import PostRead, PostDetailRead, PostUpdate
+from app.schemas.post import PostDetailRead, PostFeedListResponse, PostFeedRead
+from app.services.post_feed import (
+    posts_to_feed_reads,
+    post_to_detail_read,
+    get_comment_counts,
+    POST_LOAD_OPTIONS,
+    POST_DETAIL_OPTIONS,
+    remove_media_file,
+)
+from app.services.logger import log_user_action
 
 router = APIRouter(prefix="/posts", tags=["Посты и Публикации"])
 
-# Папка, куда физически будут сохраняться картинки постов
-UPLOAD_DIR = "media"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-@router.get("/", response_model=List[PostRead])
-def list_posts(
-    category_id: Optional[int] = None, 
-    db: Session = Depends(get_db), 
-    skip: int = 0, 
-    limit: int = 10
-):
-    """
-    Получение списка постов (Лента публикаций).
-    Поддерживает фильтрацию по ID категории.
-    """
-    query = db.query(Post)
-    
-    # Если фронтенд передал конкретную категорию - фильтруем по ней
+def _apply_feed_filters(query, category_id: Optional[int], search: Optional[str]):
     if category_id is not None:
         query = query.filter(Post.category_id == category_id)
-        
-    # Сортируем посты от новых к старым и отдаем порциями (пагинация)
-    return query.order_by(Post.created_at.desc()).offset(skip).limit(limit).all()
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                Post.title.ilike(term),
+                Post.description.ilike(term),
+            )
+        )
+    return query
 
-@router.post("/", response_model=PostRead, status_code=status.HTTP_201_CREATED)
+
+def _apply_tags(db: Session, post: Post, tags_json: Optional[str]) -> None:
+    if tags_json is None:
+        return
+    try:
+        tag_names = json.loads(tags_json)
+        if not isinstance(tag_names, list):
+            raise ValueError("tags_json must be a list")
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Неверный формат tags_json")
+
+    post.tags.clear()
+    for name in tag_names:
+        name_stripped = str(name).strip().lower()
+        if not name_stripped:
+            continue
+        tag = db.query(Tag).filter(Tag.name == name_stripped).first()
+        if not tag:
+            tag = Tag(name=name_stripped)
+            db.add(tag)
+        post.tags.append(tag)
+
+
+@router.get("/", response_model=PostFeedListResponse)
+def list_posts(
+    category_id: Optional[int] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    skip: int = 0,
+    limit: int = 10,
+):
+    filtered = _apply_feed_filters(db.query(Post), category_id, search).filter(
+        Post.is_hidden.is_(False)
+    )
+    total = filtered.count()
+    posts = (
+        filtered.options(*POST_LOAD_OPTIONS)
+        .order_by(Post.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return PostFeedListResponse(
+        items=posts_to_feed_reads(db, posts),
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.get("/my", response_model=List[PostFeedRead])
+def list_my_posts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 50,
+):
+    posts = (
+        db.query(Post)
+        .filter(Post.author_id == current_user.id)
+        .options(*POST_LOAD_OPTIONS)
+        .order_by(Post.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return posts_to_feed_reads(db, posts)
+
+
+@router.post("/", response_model=PostDetailRead, status_code=status.HTTP_201_CREATED)
 def create_post(
     title: str = Form(...),
     description: Optional[str] = Form(None),
     category_id: Optional[int] = Form(None),
-    tags_json: Optional[str] = Form(None),  # Получаем теги в виде JSON-строки, например: '["арт", "хобби"]'
-    file: UploadFile = File(...),           # Файл изображения
+    tags_json: Optional[str] = Form(None),
+    file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """
-    Создание новой публикации с загрузкой картинки и привязкой тегов
-    """
-    # 1. Валидация файла изображения
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Разрешено загружать только изображения")
+    image_url = image_service.validate_and_save_image(file)
 
-    # Генерируем уникальное имя для файла, чтобы они не перезаписывали друг друга
-    file_extension = os.path.splitext(file.filename)[1]
-    unique_filename = f"{uuid.uuid4()}{file_extension}"
-    file_path = os.path.join(UPLOAD_DIR, unique_filename)
-
-    # Сохраняем файл на диск сервера
-    with open(file_path, "wb") as buffer:
-        buffer.write(file.file.read())
-
-    # URL, по которому фронтенд сможет открыть эту картинку
-    image_url = f"/media/{unique_filename}"
-
-    # 2. Создаем сам пост
     new_post = Post(
         title=title,
         description=description,
         category_id=category_id,
-        author_id=current_user.id
+        author_id=current_user.id,
+    )
+    db.add(new_post)
+    db.flush()
+
+    _apply_tags(db, new_post, tags_json or "[]")
+    db.add(PostImage(post_id=new_post.id, image_url=image_url))
+
+    log_user_action(
+        db,
+        user_id=current_user.id,
+        action="CREATE_POST",
+        details=f"post_id={new_post.id}",
     )
 
-    # 3. Обрабатываем теги, если они переданы
-    if tags_json:
-        try:
-            tag_names = json.loads(tags_json)
-            for name in tag_names:
-                name_stripped = name.strip().lower()
-                if name_stripped:
-                    # Ищем тег в базе, если его нет - создаем новый
-                    tag = db.query(Tag).filter(Tag.name == name_stripped).first()
-                    if not tag:
-                        tag = Tag(name=name_stripped)
-                        db.add(tag)
-                    new_post.tags.append(tag)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Неверный формат поля tags_json")
-
-    db.add(new_post)
-    db.flush()  # Получаем ID созданного поста перед коммитом
-
-    # 4. Сохраняем ссылку на картинку в таблицу post_images
-    post_image = PostImage(post_id=new_post.id, image_url=image_url)
-    db.add(post_image)
-
     db.commit()
-    db.refresh(new_post)
-    return new_post
+    post = (
+        db.query(Post)
+        .options(*POST_DETAIL_OPTIONS)
+        .filter(Post.id == new_post.id)
+        .first()
+    )
+    return post_to_detail_read(post, 0)
+
 
 @router.get("/{id}", response_model=PostDetailRead)
-def get_post(id: int, db: Session = Depends(get_db)):
-    """Получение полной информации об одном посте по его ID."""
-    post = db.query(Post).filter(Post.id == id).first()
+def get_post(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    post = (
+        db.query(Post)
+        .options(*POST_DETAIL_OPTIONS)
+        .filter(Post.id == id)
+        .first()
+    )
     if not post:
         raise HTTPException(status_code=404, detail="Пост не найден")
-    return post
+    if post.is_hidden and (not current_user or not is_staff_user(current_user)):
+        raise HTTPException(status_code=404, detail="Пост не найден")
+    counts = get_comment_counts(db, [post.id])
+    return post_to_detail_read(post, counts.get(post.id, 0))
 
 
-@router.put("/{id}", response_model=PostRead)
+@router.put("/{id}", response_model=PostDetailRead)
 def update_post(
-    id: int, 
-    post_update: PostUpdate, 
-    current_user: User = Depends(get_current_user), 
-    db: Session = Depends(get_db)
+    id: int,
+    title: str = Form(...),
+    description: Optional[str] = Form(None),
+    category_id: Optional[int] = Form(None),
+    tags_json: Optional[str] = Form(None),
+    file: UploadFile = File(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """Редактирование текстовых полей поста его автором."""
-    post = db.query(Post).filter(Post.id == id).first()
+    post = (
+        db.query(Post)
+        .options(joinedload(Post.images), joinedload(Post.tags))
+        .filter(Post.id == id)
+        .first()
+    )
     if not post:
         raise HTTPException(status_code=404, detail="Пост не найден")
     if post.author_id != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав на редактирование этого поста")
-        
-    for key, value in post_update.model_dump(exclude_unset=True).items():
-        setattr(post, key, value)
-        
+
+    post.title = title
+    post.description = description
+    post.category_id = category_id
+    _apply_tags(db, post, tags_json)
+
+    if file and file.filename:
+        image_url = image_service.validate_and_save_image(file)
+        if post.images:
+            remove_media_file(post.images[0].image_url)
+            post.images[0].image_url = image_url
+        else:
+            db.add(PostImage(post_id=post.id, image_url=image_url))
+
+    log_user_action(
+        db,
+        user_id=current_user.id,
+        action="UPDATE_POST",
+        details=f"post_id={post.id}",
+    )
+
     db.commit()
-    db.refresh(post)
-    return post
+    post = (
+        db.query(Post)
+        .options(*POST_DETAIL_OPTIONS)
+        .filter(Post.id == id)
+        .first()
+    )
+    counts = get_comment_counts(db, [post.id])
+    return post_to_detail_read(post, counts.get(post.id, 0))
 
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_post(
-    id: int, 
-    current_user: User = Depends(get_current_user), 
-    db: Session = Depends(get_db)
+    id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """Удаление поста. Доступно автору или администрации."""
-    post = db.query(Post).filter(Post.id == id).first()
+    post = (
+        db.query(Post)
+        .options(joinedload(Post.images))
+        .filter(Post.id == id)
+        .first()
+    )
     if not post:
         raise HTTPException(status_code=404, detail="Пост не найден")
-    
+
     is_author = post.author_id == current_user.id
     is_staff = current_user.role and current_user.role.name in ["moderator", "admin"]
-    
+
     if not is_author and not is_staff:
         raise HTTPException(
-            status_code=403, 
-            detail="Нет прав на удаление этого поста. Вы должны быть автором или администратором."
+            status_code=403,
+            detail="Нет прав на удаление этого поста.",
         )
-        
+
+    for img in post.images:
+        remove_media_file(img.image_url)
+
+    log_user_action(
+        db,
+        user_id=current_user.id,
+        action="DELETE_POST",
+        details=f"post_id={post.id}",
+    )
+
     db.delete(post)
     db.commit()
     return None

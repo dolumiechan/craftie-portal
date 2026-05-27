@@ -2,22 +2,12 @@ import sys
 import os
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
+from app.core.security import hash_password
 from app.models.user import User, Role
-import bcrypt
 
 # Добавляем корневую директорию проекта в пути поиска Python.
 
 sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), '..')))
-
-def hash_password(password: str) -> str:
-    """
-    Хэширует пароль администратора с использованием алгоритма bcrypt.
-    Безопасный хэш записывается в БД вместо чистого текста.
-    """
-    pwd_bytes = password.encode('utf-8')
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(pwd_bytes, salt)
-    return hashed.decode('utf-8')
 
 def create_super_user():
     """

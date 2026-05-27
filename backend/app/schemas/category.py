@@ -5,7 +5,12 @@ class InterestCategoryBase(BaseModel):
     name: str
 
 class InterestCategoryCreate(InterestCategoryBase):
-    """ Схема для создания новой категории. Используется при получении данных от админа. """
+    """ Схема для создания новой категории. """
+    pass
+
+
+class InterestCategoryUpdate(InterestCategoryBase):
+    """ Схема для обновления категории. """
     pass
 
 class InterestCategoryRead(InterestCategoryBase):

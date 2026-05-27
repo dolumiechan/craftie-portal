@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     """
     
     PROJECT_NAME: str = "Craftie portal"
+    SECRET_KEY: str = "super-secret-key-change-me-in-production"
 
     # НАСТРОЙКИ ПОДКЛЮЧЕНИЯ К СУБД POSTGRESQL
     # Данные свойства автоматически маппятся (сопоставляются) с одноименными переменными из .env

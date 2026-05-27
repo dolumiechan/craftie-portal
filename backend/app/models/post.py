@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -17,6 +17,7 @@ class Post(Base):
     author_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     category_id = Column(Integer, ForeignKey("interest_categories.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_hidden = Column(Boolean, default=False, nullable=False)
 
     # === Отношения со связанными сущностями ===
     author = relationship("User", back_populates="posts")
